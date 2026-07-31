@@ -42,7 +42,7 @@ pg_host = os.environ.get("POSTGRES_HOST")
 pg_db = os.environ.get("POSTGRES_DATABASE", "postgres")
 
 if pg_user and pg_pass and pg_host:
-    database_url = f"postgresql://{pg_user}:{pg_pass}@{pg_host}:5432/{pg_db}?sslmode=require"
+    database_url = f"postgresql+pg8000://{pg_user}:{pg_pass}@{pg_host}:5432/{pg_db}"
 else:
     database_url = (
         os.environ.get("DATABASE_URL")
@@ -58,7 +58,9 @@ sqlite_uri = "sqlite:////tmp/sgpa.db" if os.environ.get("VERCEL") else f"sqlite:
 
 if database_url:
     if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
+        database_url = database_url.replace("postgres://", "postgresql+pg8000://", 1)
+    elif database_url.startswith("postgresql://") and not database_url.startswith("postgresql+pg8000://"):
+        database_url = database_url.replace("postgresql://", "postgresql+pg8000://", 1)
     
     if os.environ.get("VERCEL"):
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
