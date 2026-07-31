@@ -12,6 +12,16 @@ load_dotenv()
 
 app = Flask(__name__)
 
+supabase_client = None
+supabase_url = os.environ.get("SUPABASE_URL")
+supabase_key = os.environ.get("SUPABASE_KEY")
+if supabase_url and supabase_key:
+    try:
+        from supabase import create_client
+        supabase_client = create_client(supabase_url, supabase_key)
+    except Exception as e:
+        print(f"[INFO] Supabase client init info: {e}")
+
 def check_db_connection(url):
     try:
         parsed = urlparse(url)
