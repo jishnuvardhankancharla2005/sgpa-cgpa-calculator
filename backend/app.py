@@ -42,10 +42,12 @@ if database_url:
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     
-    if check_db_connection(database_url):
+    if os.environ.get("VERCEL"):
+        app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+    elif check_db_connection(database_url):
         app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     else:
-        print("[INFO] PostgreSQL target unreachable on port 5432. Defaulting to local SQLite database...")
+        print("[INFO] PostgreSQL target unreachable locally. Defaulting to local SQLite database...")
         app.config["SQLALCHEMY_DATABASE_URI"] = sqlite_uri
 else:
     app.config["SQLALCHEMY_DATABASE_URI"] = sqlite_uri
