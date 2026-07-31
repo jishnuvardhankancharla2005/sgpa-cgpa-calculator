@@ -86,21 +86,37 @@ def get_semesters():
 def add_semester():
     user_id = get_current_user_id()
     data = request.get_json() or {}
-    sem_number = data.get("sem_number", 1)
+    
+    try:
+        sem_number = int(data.get("sem_number", 1))
+    except (ValueError, TypeError):
+        sem_number = 1
 
-    sem = Semester(sem_number=sem_number, user_id=user_id)
-    db.session.add(sem)
-    db.session.flush()
+    # Check if user already has a semester with this sem_number (upsert)
+    sem = Semester.query.filter_by(user_id=user_id, sem_number=sem_number).first()
+    if not sem:
+        sem = Semester(sem_number=sem_number, user_id=user_id)
+        db.session.add(sem)
+        db.session.flush()
+    else:
+        # Delete old subjects for this semester before updating
+        Subject.query.filter_by(sem_id=sem.id).delete()
 
     for s in data.get("subjects", []):
+        try:
+            credits_val = float(s.get("credits", 0))
+        except (ValueError, TypeError):
+            credits_val = 0.0
+
         sub = Subject(
-            name=s["name"],
-            credits=float(s["credits"]),
-            grade=s["grade"],
-            is_audit=s.get("is_audit", False),
+            name=str(s.get("name", "")).strip() or "Untitled Subject",
+            credits=credits_val,
+            grade=str(s.get("grade", "S")).strip(),
+            is_audit=bool(s.get("is_audit", False)),
             sem_id=sem.id
         )
         db.session.add(sub)
+    
     db.session.commit()
 
     subjects = Subject.query.filter_by(sem_id=sem.id).all()
@@ -119,18 +135,27 @@ def update_semester(sem_id):
     data = request.get_json() or {}
 
     if "sem_number" in data:
-        sem.sem_number = data["sem_number"]
+        try:
+            sem.sem_number = int(data["sem_number"])
+        except (ValueError, TypeError):
+            pass
 
     Subject.query.filter_by(sem_id=sem.id).delete()
     for s in data.get("subjects", []):
+        try:
+            credits_val = float(s.get("credits", 0))
+        except (ValueError, TypeError):
+            credits_val = 0.0
+
         sub = Subject(
-            name=s["name"],
-            credits=float(s["credits"]),
-            grade=s["grade"],
-            is_audit=s.get("is_audit", False),
+            name=str(s.get("name", "")).strip() or "Untitled Subject",
+            credits=credits_val,
+            grade=str(s.get("grade", "S")).strip(),
+            is_audit=bool(s.get("is_audit", False)),
             sem_id=sem.id
         )
         db.session.add(sub)
+    
     db.session.commit()
 
     subjects = Subject.query.filter_by(sem_id=sem.id).all()

@@ -45,7 +45,7 @@ export default function SemesterForm({ semNumber = 1, initialSubjects, onSave, o
     <form onSubmit={handleSubmit} style={{ background: "#fff", padding: 24, borderRadius: 8, marginBottom: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.1)" }}>
       <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
         <label style={{ fontWeight: 600 }}>Semester:</label>
-        <input type="number" min={1} max={12} value={semesterNo} onChange={(e) => setSemesterNo(Number(e.target.value))} style={{ width: 70, padding: "6px 8px", border: "1px solid #d9d9d9", borderRadius: 4 }} />
+        <input type="number" min={1} value={semesterNo} onChange={(e) => setSemesterNo(Math.max(1, Number(e.target.value) || 1))} style={{ width: 80, padding: "6px 8px", border: "1px solid #d9d9d9", borderRadius: 4 }} />
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>

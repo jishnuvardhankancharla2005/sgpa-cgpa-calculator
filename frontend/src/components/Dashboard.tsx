@@ -139,7 +139,7 @@ function EditCard({ sem, onSave, onCancel }: {
     <div style={{ background: "#fff", padding: 16, borderRadius: 8, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.1)", border: "2px solid #1890ff" }}>
       <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
         <label style={{ fontWeight: 600, fontSize: 14 }}>Semester:</label>
-        <input type="number" min={1} max={12} value={semNumber} onChange={(e) => setSemNumber(Number(e.target.value))} style={{ width: 70, padding: "4px 6px", border: "1px solid #d9d9d9", borderRadius: 4, fontSize: 13 }} />
+        <input type="number" min={1} value={semNumber} onChange={(e) => setSemNumber(Math.max(1, Number(e.target.value) || 1))} style={{ width: 80, padding: "4px 6px", border: "1px solid #d9d9d9", borderRadius: 4, fontSize: 13 }} />
         <span style={{ fontSize: 13, color: "#666" }}>— Editing (subjects below)</span>
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -176,40 +176,58 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
 
   const load = async () => {
+    setError("");
     try {
       const { data } = await api.get("/semesters");
       setSemesters(data);
+      localStorage.setItem("sgpa_cached_sems", JSON.stringify(data));
     } catch {
-      setError("Failed to load. Is backend running?");
+      const cached = localStorage.getItem("sgpa_cached_sems");
+      if (cached) {
+        setSemesters(JSON.parse(cached));
+      } else {
+        setError("Failed to load semester data from server.");
+      }
     }
   };
 
   useEffect(() => { load(); }, []);
 
   const handleAddSemester = async (semNumber: number, subjects: any[]) => {
+    setError("");
     try {
-      const normalized = subjects.map((s: any) => ({ ...s, credits: Number(s.credits), grade: s.grade || "S" }));
+      const normalized = subjects.map((s: any) => ({
+        ...s,
+        credits: parseFloat(s.credits) || 0,
+        grade: s.grade || "S"
+      }));
       await api.post("/semesters", { sem_number: semNumber, subjects: normalized });
       setShowAddForm(false);
       await load();
-    } catch {
-      setError("Failed to save semester");
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to save semester. Please try again.");
     }
   };
 
   const handleEditSave = async (id: number, semNumber: number, subjects: any[]) => {
+    setError("");
     try {
-      const normalized = subjects.map((s: any) => ({ ...s, credits: Number(s.credits), grade: s.grade || "S" }));
+      const normalized = subjects.map((s: any) => ({
+        ...s,
+        credits: parseFloat(s.credits) || 0,
+        grade: s.grade || "S"
+      }));
       await api.put(`/semesters/${id}`, { sem_number: semNumber, subjects: normalized });
       setEditingId(null);
       await load();
-    } catch {
-      setError("Failed to update semester");
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Failed to update semester. Please try again.");
     }
   };
 
   const handleDelete = async (id: number) => {
     if (!confirm("Delete this semester?")) return;
+    setError("");
     try {
       await api.delete(`/semesters/${id}`);
       await load();
