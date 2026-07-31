@@ -56,7 +56,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         onLoginSuccess(data.user, data.token);
       }
     } catch (err: any) {
-      const msg = err.response?.data?.message || "An error occurred during authentication.";
+      const msg = err.response?.data?.message || (err.message ? `Connection error: ${err.message}` : "An error occurred during authentication.");
       setError(msg);
     } finally {
       setLoading(false);

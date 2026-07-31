@@ -35,17 +35,29 @@ def register():
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
 
-    if User.query.filter_by(username=username).first():
-        return jsonify({"message": "Username already exists"}), 400
-
     try:
+        if User.query.filter_by(username=username).first():
+            return jsonify({"message": "Username already exists"}), 400
+
         user = User(username=username, name=name, role=role)
         user.set_password(password)
         db.session.add(user)
         db.session.commit()
     except Exception as e:
         db.session.rollback()
-        return jsonify({"message": "Failed to create account due to database error"}), 500
+        try:
+            db.create_all()
+            if User.query.filter_by(username=username).first():
+                return jsonify({"message": "Username already exists"}), 400
+
+            user = User(username=username, name=name, role=role)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+        except Exception as err:
+            db.session.rollback()
+            print(f"[ERROR] Registration DB error: {err}")
+            return jsonify({"message": "Database tables not initialized. Please run SQL setup script in Supabase."}), 500
 
     token = create_access_token(identity=str(user.id))
     return jsonify({"token": token, "user": user.to_dict()}), 201
