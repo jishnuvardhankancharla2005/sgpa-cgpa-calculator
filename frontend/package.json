@@ -16,6 +16,7 @@
     "vite": "^5.2.0"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.111.0",
     "axios": "^1.6.8",
     "chart.js": "^4.4.2",
     "html2canvas": "^1.4.1",
