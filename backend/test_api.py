@@ -1,6 +1,7 @@
 import json
 from app import app, db
 
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
 client = app.test_client()
 
 def test():

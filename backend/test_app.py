@@ -1,6 +1,7 @@
 from app import app, db
 
 app.config["TESTING"] = True
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
 client = app.test_client()
 
 with app.app_context():

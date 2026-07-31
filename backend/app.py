@@ -44,6 +44,8 @@ else:
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "sgpa-secret-jwt-key-2026-super-secure-key-32bytes")
+from datetime import timedelta
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=30)
 
 CORS(app)
 db.init_app(app)

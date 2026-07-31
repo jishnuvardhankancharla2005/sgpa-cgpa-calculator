@@ -26,9 +26,10 @@ def safe_float(val, default=0.0):
 @api.route("/auth/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
-    username = str(data.get("username", "")).strip()
-    password = str(data.get("password", "")).strip()
-    name = str(data.get("name", "")).strip() or username
+    raw_username = str(data.get("username", "")).strip()
+    username = raw_username.lower()
+    password = str(data.get("password", ""))
+    name = str(data.get("name", "")).strip() or raw_username
     role = str(data.get("role", "student")).strip()
 
     if not username or not password:
@@ -49,8 +50,8 @@ def register():
 @api.route("/auth/login", methods=["POST"])
 def login():
     data = request.get_json() or {}
-    username = str(data.get("username", "")).strip()
-    password = str(data.get("password", "")).strip()
+    username = str(data.get("username", "")).strip().lower()
+    password = str(data.get("password", ""))
 
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
