@@ -6,17 +6,19 @@ db = SQLAlchemy()
 class User(db.Model):
     __tablename__ = "users"
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(256), nullable=False)
     name = db.Column(db.String(120), nullable=True)
     role = db.Column(db.String(20), default="student") # "student" or "admin"
     semesters = db.relationship("Semester", backref="user", lazy=True, cascade="all, delete-orphan")
 
     def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+        self.password_hash = generate_password_hash(str(password).strip())
 
     def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
+        if not self.password_hash or not password:
+            return False
+        return check_password_hash(self.password_hash, str(password).strip())
 
     def to_dict(self):
         return {
@@ -52,4 +54,3 @@ class Subject(db.Model):
             "id": self.id, "name": self.name, "credits": self.credits,
             "grade": self.grade, "is_audit": self.is_audit, "sem_id": self.sem_id
         }
-

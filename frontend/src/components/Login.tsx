@@ -26,12 +26,21 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     setError("");
     setLoading(true);
 
+    const cleanUsername = username.trim();
+    const cleanPassword = password.trim();
+
+    if (!cleanUsername || !cleanPassword) {
+      setError("Username and password are required.");
+      setLoading(false);
+      return;
+    }
+
     try {
       if (isRegister) {
         const { data } = await api.post("/auth/register", {
-          username,
-          password,
-          name: name || username,
+          username: cleanUsername,
+          password: cleanPassword,
+          name: name.trim() || cleanUsername,
           role,
         });
         localStorage.setItem("sgpa_token", data.token);
@@ -39,8 +48,8 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         onLoginSuccess(data.user, data.token);
       } else {
         const { data } = await api.post("/auth/login", {
-          username,
-          password,
+          username: cleanUsername,
+          password: cleanPassword,
         });
         localStorage.setItem("sgpa_token", data.token);
         localStorage.setItem("sgpa_user", JSON.stringify(data.user));

@@ -28,7 +28,7 @@ def register():
     data = request.get_json() or {}
     raw_username = str(data.get("username", "")).strip()
     username = raw_username.lower()
-    password = str(data.get("password", ""))
+    password = str(data.get("password", "")).strip()
     name = str(data.get("name", "")).strip() or raw_username
     role = str(data.get("role", "student")).strip()
 
@@ -38,10 +38,14 @@ def register():
     if User.query.filter_by(username=username).first():
         return jsonify({"message": "Username already exists"}), 400
 
-    user = User(username=username, name=name, role=role)
-    user.set_password(password)
-    db.session.add(user)
-    db.session.commit()
+    try:
+        user = User(username=username, name=name, role=role)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": "Failed to create account due to database error"}), 500
 
     token = create_access_token(identity=str(user.id))
     return jsonify({"token": token, "user": user.to_dict()}), 201
@@ -51,7 +55,7 @@ def register():
 def login():
     data = request.get_json() or {}
     username = str(data.get("username", "")).strip().lower()
-    password = str(data.get("password", ""))
+    password = str(data.get("password", "")).strip()
 
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
