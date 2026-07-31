@@ -68,7 +68,9 @@ def login():
 @jwt_required()
 def get_me():
     user_id = get_current_user_id()
-    user = User.query.get(user_id)
+    if not user_id:
+        return jsonify({"message": "User not found"}), 404
+    user = db.session.get(User, user_id)
     if not user:
         return jsonify({"message": "User not found"}), 404
     return jsonify({"user": user.to_dict()}), 200
@@ -210,11 +212,11 @@ def get_transcript():
 
     # Handle admin requesting a specific student's transcript
     if requested_student_id and user_id is not None:
-        current_user = User.query.get(user_id)
+        current_user = db.session.get(User, user_id)
         if current_user and current_user.role == "admin":
             user_id = safe_int(requested_student_id, user_id)
 
-    student_user = User.query.get(user_id) if user_id is not None else None
+    student_user = db.session.get(User, user_id) if user_id is not None else None
     semesters = Semester.query.filter_by(user_id=user_id).order_by(Semester.sem_number).all()
 
     sem_data = []
@@ -293,7 +295,9 @@ def import_data():
 @jwt_required()
 def get_students():
     user_id = get_current_user_id()
-    current_user = User.query.get(user_id)
+    if not user_id:
+        return jsonify({"message": "Admin authorization required"}), 403
+    current_user = db.session.get(User, user_id)
     if not current_user or current_user.role != "admin":
         return jsonify({"message": "Admin authorization required"}), 403
 
@@ -305,7 +309,9 @@ def get_students():
 @jwt_required()
 def admin_bulk_upload():
     user_id = get_current_user_id()
-    current_user = User.query.get(user_id)
+    if not user_id:
+        return jsonify({"message": "Admin authorization required"}), 403
+    current_user = db.session.get(User, user_id)
     if not current_user or current_user.role != "admin":
         return jsonify({"message": "Admin authorization required"}), 403
 
@@ -313,7 +319,7 @@ def admin_bulk_upload():
     entries = data.get("entries", [])
 
     for entry in entries:
-        username = str(entry.get("username", "")).strip()
+        username = str(entry.get("username", "")).strip().lower()
         if not username:
             continue
 
