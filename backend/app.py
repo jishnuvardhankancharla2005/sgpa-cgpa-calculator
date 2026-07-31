@@ -26,7 +26,15 @@ def check_db_connection(url):
         return False
 
 # Database URI configuration
-database_url = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or os.environ.get("POSTGRES_URL_NON_POOLING")
+database_url = (
+    os.environ.get("DATABASE_URL")
+    or os.environ.get("POSTGRES_URL")
+    or os.environ.get("POSTGRES_URL_NON_POOLING")
+    or os.environ.get("SUPABASE_DATABASE_URL")
+    or os.environ.get("SUPABASE_POSTGRES_URL")
+    or os.environ.get("POSTGRES_PRISMA_URL")
+    or os.environ.get("STORAGE_URL")
+)
 sqlite_path = os.path.join(os.path.dirname(__file__), "sgpa.db")
 sqlite_uri = "sqlite:////tmp/sgpa.db" if os.environ.get("VERCEL") else f"sqlite:///{sqlite_path}"
 
