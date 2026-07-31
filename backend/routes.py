@@ -9,15 +9,27 @@ def get_current_user_id():
     identity = get_jwt_identity()
     return int(identity) if identity is not None else None
 
+def safe_int(val, default=1):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+def safe_float(val, default=0.0):
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
 # ================= AUTHENTICATION ROUTES =================
 
 @api.route("/auth/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
-    username = data.get("username")
-    password = data.get("password")
-    name = data.get("name", username)
-    role = data.get("role", "student")
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", "")).strip()
+    name = str(data.get("name", "")).strip() or username
+    role = str(data.get("role", "student")).strip()
 
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
@@ -37,8 +49,8 @@ def register():
 @api.route("/auth/login", methods=["POST"])
 def login():
     data = request.get_json() or {}
-    username = data.get("username")
-    password = data.get("password")
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", "")).strip()
 
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
@@ -86,11 +98,7 @@ def get_semesters():
 def add_semester():
     user_id = get_current_user_id()
     data = request.get_json() or {}
-    
-    try:
-        sem_number = int(data.get("sem_number", 1))
-    except (ValueError, TypeError):
-        sem_number = 1
+    sem_number = safe_int(data.get("sem_number"), 1)
 
     # Check if user already has a semester with this sem_number (upsert)
     sem = Semester.query.filter_by(user_id=user_id, sem_number=sem_number).first()
@@ -103,20 +111,15 @@ def add_semester():
         Subject.query.filter_by(sem_id=sem.id).delete()
 
     for s in data.get("subjects", []):
-        try:
-            credits_val = float(s.get("credits", 0))
-        except (ValueError, TypeError):
-            credits_val = 0.0
-
         sub = Subject(
             name=str(s.get("name", "")).strip() or "Untitled Subject",
-            credits=credits_val,
+            credits=safe_float(s.get("credits"), 0.0),
             grade=str(s.get("grade", "S")).strip(),
             is_audit=bool(s.get("is_audit", False)),
             sem_id=sem.id
         )
         db.session.add(sub)
-    
+
     db.session.commit()
 
     subjects = Subject.query.filter_by(sem_id=sem.id).all()
@@ -135,27 +138,19 @@ def update_semester(sem_id):
     data = request.get_json() or {}
 
     if "sem_number" in data:
-        try:
-            sem.sem_number = int(data["sem_number"])
-        except (ValueError, TypeError):
-            pass
+        sem.sem_number = safe_int(data["sem_number"], sem.sem_number)
 
     Subject.query.filter_by(sem_id=sem.id).delete()
     for s in data.get("subjects", []):
-        try:
-            credits_val = float(s.get("credits", 0))
-        except (ValueError, TypeError):
-            credits_val = 0.0
-
         sub = Subject(
             name=str(s.get("name", "")).strip() or "Untitled Subject",
-            credits=credits_val,
+            credits=safe_float(s.get("credits"), 0.0),
             grade=str(s.get("grade", "S")).strip(),
             is_audit=bool(s.get("is_audit", False)),
             sem_id=sem.id
         )
         db.session.add(sub)
-    
+
     db.session.commit()
 
     subjects = Subject.query.filter_by(sem_id=sem.id).all()
@@ -187,18 +182,21 @@ def batch_semesters():
         db.session.commit()
 
     for entry in data.get("semesters", []):
-        sem = Semester(sem_number=entry["sem_number"], user_id=user_id)
+        sem_number = safe_int(entry.get("sem_number"), 1)
+        sem = Semester(sem_number=sem_number, user_id=user_id)
         db.session.add(sem)
         db.session.flush()
+
         for s in entry.get("subjects", []):
             sub = Subject(
-                name=s["name"],
-                credits=float(s["credits"]),
-                grade=s["grade"],
-                is_audit=s.get("is_audit", False),
+                name=str(s.get("name", "")).strip() or "Untitled Subject",
+                credits=safe_float(s.get("credits"), 0.0),
+                grade=str(s.get("grade", "S")).strip(),
+                is_audit=bool(s.get("is_audit", False)),
                 sem_id=sem.id
             )
             db.session.add(sub)
+
     db.session.commit()
     return jsonify({"message": "Semesters processed"}), 200
 
@@ -213,7 +211,7 @@ def get_transcript():
     if requested_student_id and user_id is not None:
         current_user = User.query.get(user_id)
         if current_user and current_user.role == "admin":
-            user_id = int(requested_student_id)
+            user_id = safe_int(requested_student_id, user_id)
 
     student_user = User.query.get(user_id) if user_id is not None else None
     semesters = Semester.query.filter_by(user_id=user_id).order_by(Semester.sem_number).all()
@@ -269,18 +267,21 @@ def import_data():
     db.session.commit()
 
     for entry in data.get("semesters", []):
-        sem = Semester(sem_number=entry["sem_number"], user_id=user_id)
+        sem_number = safe_int(entry.get("sem_number"), 1)
+        sem = Semester(sem_number=sem_number, user_id=user_id)
         db.session.add(sem)
         db.session.flush()
+
         for s in entry.get("subjects", []):
             sub = Subject(
-                name=s["name"],
-                credits=float(s["credits"]),
-                grade=s["grade"],
-                is_audit=s.get("is_audit", False),
+                name=str(s.get("name", "")).strip() or "Untitled Subject",
+                credits=safe_float(s.get("credits"), 0.0),
+                grade=str(s.get("grade", "S")).strip(),
+                is_audit=bool(s.get("is_audit", False)),
                 sem_id=sem.id
             )
             db.session.add(sub)
+
     db.session.commit()
     return jsonify({"message": "Data imported"}), 200
 
@@ -311,9 +312,12 @@ def admin_bulk_upload():
     entries = data.get("entries", [])
 
     for entry in entries:
-        username = entry.get("username")
-        name = entry.get("name", username)
-        password = entry.get("password", "password123")
+        username = str(entry.get("username", "")).strip()
+        if not username:
+            continue
+
+        name = str(entry.get("name", "")).strip() or username
+        password = str(entry.get("password", "password123")).strip()
 
         user = User.query.filter_by(username=username).first()
         if not user:
@@ -322,17 +326,17 @@ def admin_bulk_upload():
             db.session.add(user)
             db.session.flush()
 
-        sem_number = entry.get("sem_number", 1)
+        sem_number = safe_int(entry.get("sem_number"), 1)
         sem = Semester(sem_number=sem_number, user_id=user.id)
         db.session.add(sem)
         db.session.flush()
 
         for s in entry.get("subjects", []):
             sub = Subject(
-                name=s["name"],
-                credits=float(s["credits"]),
-                grade=s["grade"],
-                is_audit=s.get("is_audit", False),
+                name=str(s.get("name", "")).strip() or "Untitled Subject",
+                credits=safe_float(s.get("credits"), 0.0),
+                grade=str(s.get("grade", "S")).strip(),
+                is_audit=bool(s.get("is_audit", False)),
                 sem_id=sem.id
             )
             db.session.add(sub)
