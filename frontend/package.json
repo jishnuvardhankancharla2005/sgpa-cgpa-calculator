@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,20 +9,20 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.5",
-    "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0"
   },
   "dependencies": {
-    "axios": "^1.19.0",
-    "chart.js": "^4.5.1",
+    "axios": "^1.6.8",
+    "chart.js": "^4.4.2",
     "html2canvas": "^1.4.1",
-    "jspdf": "^2.5.2",
-    "pdfjs-dist": "^4.8.69",
-    "react": "^19.2.8",
-    "react-chartjs-2": "^5.3.1",
-    "react-dom": "^19.2.8"
+    "jspdf": "^2.5.1",
+    "pdfjs-dist": "4.4.168",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.2.0"
   }
 }
