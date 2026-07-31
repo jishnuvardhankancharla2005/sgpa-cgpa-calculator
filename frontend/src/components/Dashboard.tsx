@@ -167,7 +167,7 @@ function EditCard({ sem, onSave, onCancel }: {
   );
 }
 
-export default function Dashboard() {
+export default function Dashboard({ user }: { user?: { id: number; username: string; name: string; role: string } }) {
   const [semesters, setSemesters] = useState<SemesterData[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -276,7 +276,10 @@ export default function Dashboard() {
   return (
     <div style={{ maxWidth: 960, margin: "0 auto", padding: 24 }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 style={{ fontSize: 24 }}>SGPA / CGPA Calculator</h1>
+        <div>
+          <h1 style={{ fontSize: 24, margin: "0 0 4px 0" }}>SGPA / CGPA Calculator</h1>
+          {user && <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>Welcome back, <strong>{user.name}</strong>!</p>}
+        </div>
       </header>
 
       {error && <p style={{ color: "red", marginBottom: 12 }}>{error}</p>}
