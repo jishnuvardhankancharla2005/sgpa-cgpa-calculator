@@ -12,6 +12,17 @@ class User(db.Model):
     role = db.Column(db.String(20), default="student") # "student" or "admin"
     semesters = db.relationship("Semester", backref="user", lazy=True, cascade="all, delete-orphan")
 
+    def __init__(self, username=None, password_hash=None, name=None, role="student", **kwargs):
+        super().__init__(**kwargs)
+        if username is not None:
+            self.username = username
+        if password_hash is not None:
+            self.password_hash = password_hash
+        if name is not None:
+            self.name = name
+        if role is not None:
+            self.role = role
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(str(password).strip())
 
@@ -36,6 +47,13 @@ class Semester(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     subjects = db.relationship("Subject", backref="semester", lazy=True, cascade="all, delete-orphan")
 
+    def __init__(self, sem_number=None, user_id=None, **kwargs):
+        super().__init__(**kwargs)
+        if sem_number is not None:
+            self.sem_number = sem_number
+        if user_id is not None:
+            self.user_id = user_id
+
     def to_dict(self):
         return {"id": self.id, "sem_number": self.sem_number, "user_id": self.user_id}
 
@@ -48,6 +66,19 @@ class Subject(db.Model):
     grade = db.Column(db.String(2), nullable=False)
     is_audit = db.Column(db.Boolean, default=False)
     sem_id = db.Column(db.Integer, db.ForeignKey("semesters.id"), nullable=False)
+
+    def __init__(self, name=None, credits=None, grade=None, is_audit=False, sem_id=None, **kwargs):
+        super().__init__(**kwargs)
+        if name is not None:
+            self.name = name
+        if credits is not None:
+            self.credits = credits
+        if grade is not None:
+            self.grade = grade
+        if is_audit is not None:
+            self.is_audit = is_audit
+        if sem_id is not None:
+            self.sem_id = sem_id
 
     def to_dict(self):
         return {
