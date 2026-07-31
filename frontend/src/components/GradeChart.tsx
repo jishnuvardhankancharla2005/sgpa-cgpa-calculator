@@ -56,7 +56,7 @@ export default function GradeChart({ semesters }: Props) {
     responsive: true,
     plugins: {
       legend: { display: false },
-      tooltip: { callbacks: { label: (ctx: any) => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(2)}` } },
+      tooltip: { callbacks: { label: (ctx: any) => `${ctx.dataset.label}: ${(ctx.parsed?.y ?? 0).toFixed(2)}` } },
     },
     scales: {
       y: { min: 0, max: 10, ticks: { stepSize: 1 } },
