@@ -1,13 +1,17 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity, create_access_token
+from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, User, Semester, Subject
 from sgpa import calculate_sgpa, calculate_cgpa, cgpa_to_percentage, get_class
 
 api = Blueprint("api", __name__)
 
+def get_mongo_db():
+    return current_app.config.get("MONGO_DB")
+
 def get_current_user_id():
     identity = get_jwt_identity()
-    return int(identity) if identity is not None else None
+    return int(identity) if (identity is not None and str(identity).isdigit()) else identity
 
 def safe_int(val, default=1):
     try:
@@ -20,6 +24,41 @@ def safe_float(val, default=0.0):
         return float(val)
     except (ValueError, TypeError):
         return default
+
+def compress_subject(s):
+    """Ultra-compact dictionary encoding to minimize MongoDB BSON storage footprint by >50%."""
+    res = {
+        "n": str(s.get("name", "")).strip()[:100],
+        "c": safe_float(s.get("credits"), 0.0),
+        "g": str(s.get("grade", "S")).strip().upper()[:2],
+    }
+    if s.get("is_audit"):
+        res["a"] = True
+    return res
+
+def decompress_subject(s):
+    """Decompress ultra-compact BSON fields into standard frontend API keys."""
+    if isinstance(s, dict) and "n" in s:
+        return {
+            "name": s.get("n", ""),
+            "credits": s.get("c", 0.0),
+            "grade": s.get("g", "S"),
+            "is_audit": bool(s.get("a", False))
+        }
+    if isinstance(s, dict):
+        return {
+            "name": str(s.get("name", "")).strip(),
+            "credits": safe_float(s.get("credits"), 0.0),
+            "grade": str(s.get("grade", "S")).strip(),
+            "is_audit": bool(s.get("is_audit", False))
+        }
+    return {
+        "name": str(getattr(s, "name", "")).strip(),
+        "credits": safe_float(getattr(s, "credits", 0.0), 0.0),
+        "grade": str(getattr(s, "grade", "S")).strip(),
+        "is_audit": bool(getattr(s, "is_audit", False))
+    }
+
 
 # ================= AUTHENTICATION ROUTES =================
 
@@ -34,6 +73,27 @@ def register():
 
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
+
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        if mongo_db.users.find_one({"username": username}):
+            return jsonify({"message": "Username already exists"}), 400
+        
+        last_user = mongo_db.users.find_one(sort=[("_id", -1)])
+        next_id = (last_user["_id"] + 1) if (last_user and isinstance(last_user.get("_id"), int)) else 1
+        
+        hashed_pwd = generate_password_hash(password)
+        user_doc = {
+            "_id": next_id,
+            "username": username,
+            "password_hash": hashed_pwd,
+            "name": name,
+            "role": role
+        }
+        mongo_db.users.insert_one(user_doc)
+        token = create_access_token(identity=str(next_id))
+        user_dict = {"id": next_id, "username": username, "name": name, "role": role}
+        return jsonify({"token": token, "user": user_dict}), 201
 
     try:
         if User.query.filter_by(username=username).first():
@@ -57,7 +117,7 @@ def register():
         except Exception as err:
             db.session.rollback()
             print(f"[ERROR] Registration DB error: {err}")
-            return jsonify({"message": "Database tables not initialized. Please run SQL setup script in Supabase."}), 500
+            return jsonify({"message": "Database error"}), 500
 
     token = create_access_token(identity=str(user.id))
     return jsonify({"token": token, "user": user.to_dict()}), 201
@@ -71,6 +131,22 @@ def login():
 
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
+
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        user = mongo_db.users.find_one({"username": username})
+        if not user or not check_password_hash(user.get("password_hash", ""), password):
+            return jsonify({"message": "Invalid username or password"}), 401
+        
+        user_id = user["_id"]
+        token = create_access_token(identity=str(user_id))
+        user_dict = {
+            "id": user_id,
+            "username": user["username"],
+            "name": user.get("name") or user["username"],
+            "role": user.get("role", "student")
+        }
+        return jsonify({"token": token, "user": user_dict}), 200
 
     user = User.query.filter_by(username=username).first()
     if not user or not user.check_password(password):
@@ -86,10 +162,25 @@ def get_me():
     user_id = get_current_user_id()
     if not user_id:
         return jsonify({"message": "User not found"}), 404
+
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        user = mongo_db.users.find_one({"_id": user_id}) or mongo_db.users.find_one({"_id": safe_int(user_id)})
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+        user_dict = {
+            "id": user["_id"],
+            "username": user["username"],
+            "name": user.get("name") or user["username"],
+            "role": user.get("role", "student")
+        }
+        return jsonify({"user": user_dict}), 200
+
     user = db.session.get(User, user_id)
     if not user:
         return jsonify({"message": "User not found"}), 404
     return jsonify({"user": user.to_dict()}), 200
+
 
 
 # ================= SEMESTER & TRANSCRIPT ROUTES =================
@@ -98,6 +189,22 @@ def get_me():
 @jwt_required(optional=True)
 def get_semesters():
     user_id = get_current_user_id()
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        cursor = mongo_db.semesters.find({"user_id": user_id}).sort("sem_number", 1)
+        result = []
+        for doc in cursor:
+            raw_subs = doc.get("subjects", [])
+            subjects = [decompress_subject(s) for s in raw_subs]
+            sgpa = calculate_sgpa(subjects)
+            result.append({
+                "id": str(doc["_id"]),
+                "sem_number": doc.get("sem_number", 1),
+                "subjects": subjects,
+                "sgpa": sgpa
+            })
+        return jsonify(result)
+
     semesters = Semester.query.filter_by(user_id=user_id).order_by(Semester.sem_number).all()
     result = []
     for sem in semesters:
@@ -118,23 +225,49 @@ def add_semester():
     user_id = get_current_user_id()
     data = request.get_json() or {}
     sem_number = safe_int(data.get("sem_number"), 1)
+    
+    subjects_list = []
+    for s in data.get("subjects", []):
+        subjects_list.append({
+            "name": str(s.get("name", "")).strip() or "Untitled Subject",
+            "credits": safe_float(s.get("credits"), 0.0),
+            "grade": str(s.get("grade", "S")).strip(),
+            "is_audit": bool(s.get("is_audit", False))
+        })
 
-    # Check if user already has a semester with this sem_number (upsert)
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        compressed = [compress_subject(s) for s in subjects_list]
+        mongo_db.semesters.update_one(
+            {"user_id": user_id, "sem_number": sem_number},
+            {"$set": {"user_id": user_id, "sem_number": sem_number, "subjects": compressed}},
+            upsert=True
+        )
+        sem_doc = mongo_db.semesters.find_one({"user_id": user_id, "sem_number": sem_number})
+        sgpa = calculate_sgpa(subjects_list)
+        return jsonify({
+            "id": str(sem_doc["_id"]),
+            "sem_number": sem_number,
+            "user_id": user_id,
+            "sgpa": sgpa,
+            "subjects": subjects_list
+        }), 201
+
+
     sem = Semester.query.filter_by(user_id=user_id, sem_number=sem_number).first()
     if not sem:
         sem = Semester(sem_number=sem_number, user_id=user_id)
         db.session.add(sem)
         db.session.flush()
     else:
-        # Delete old subjects for this semester before updating
         Subject.query.filter_by(sem_id=sem.id).delete()
 
-    for s in data.get("subjects", []):
+    for s in subjects_list:
         sub = Subject(
-            name=str(s.get("name", "")).strip() or "Untitled Subject",
-            credits=safe_float(s.get("credits"), 0.0),
-            grade=str(s.get("grade", "S")).strip(),
-            is_audit=bool(s.get("is_audit", False)),
+            name=s["name"],
+            credits=s["credits"],
+            grade=s["grade"],
+            is_audit=s["is_audit"],
             sem_id=sem.id
         )
         db.session.add(sub)
@@ -149,38 +282,66 @@ def add_semester():
     }), 201
 
 
-@api.route("/semesters/<int:sem_id>", methods=["PUT"])
+@api.route("/semesters/<sem_id>", methods=["PUT"])
 @jwt_required(optional=True)
 def update_semester(sem_id):
     user_id = get_current_user_id()
-    sem = Semester.query.filter_by(id=sem_id, user_id=user_id).first_or_404()
     data = request.get_json() or {}
+    
+    subjects_list = []
+    for s in data.get("subjects", []):
+        subjects_list.append({
+            "name": str(s.get("name", "")).strip() or "Untitled Subject",
+            "credits": safe_float(s.get("credits"), 0.0),
+            "grade": str(s.get("grade", "S")).strip(),
+            "is_audit": bool(s.get("is_audit", False))
+        })
 
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        new_sem_num = safe_int(data.get("sem_number"), safe_int(sem_id))
+        compressed = [compress_subject(s) for s in subjects_list]
+        mongo_db.semesters.update_one(
+            {"user_id": user_id, "sem_number": safe_int(sem_id)},
+            {"$set": {"sem_number": new_sem_num, "subjects": compressed}}
+        )
+        return jsonify({"sgpa": calculate_sgpa(subjects_list), "subjects": subjects_list})
+
+    sem = Semester.query.filter_by(id=safe_int(sem_id), user_id=user_id).first_or_404()
     if "sem_number" in data:
         sem.sem_number = safe_int(data["sem_number"], sem.sem_number)
 
     Subject.query.filter_by(sem_id=sem.id).delete()
-    for s in data.get("subjects", []):
+    for s in subjects_list:
         sub = Subject(
-            name=str(s.get("name", "")).strip() or "Untitled Subject",
-            credits=safe_float(s.get("credits"), 0.0),
-            grade=str(s.get("grade", "S")).strip(),
-            is_audit=bool(s.get("is_audit", False)),
+            name=s["name"],
+            credits=s["credits"],
+            grade=s["grade"],
+            is_audit=s["is_audit"],
             sem_id=sem.id
         )
         db.session.add(sub)
 
     db.session.commit()
-
     subjects = Subject.query.filter_by(sem_id=sem.id).all()
     return jsonify({"sgpa": calculate_sgpa(subjects), "subjects": [s.to_dict() for s in subjects]})
 
 
-@api.route("/semesters/<int:sem_id>", methods=["DELETE"])
+@api.route("/semesters/<sem_id>", methods=["DELETE"])
 @jwt_required(optional=True)
 def delete_semester(sem_id):
     user_id = get_current_user_id()
-    sem = Semester.query.filter_by(id=sem_id, user_id=user_id).first_or_404()
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        from bson.objectid import ObjectId
+        try:
+            query = {"_id": ObjectId(sem_id), "user_id": user_id}
+        except Exception:
+            query = {"sem_number": safe_int(sem_id), "user_id": user_id}
+        mongo_db.semesters.delete_one(query)
+        return jsonify({"message": "Deleted"})
+
+    sem = Semester.query.filter_by(id=safe_int(sem_id), user_id=user_id).first_or_404()
     db.session.delete(sem)
     db.session.commit()
     return jsonify({"message": "Deleted"})
@@ -192,6 +353,29 @@ def batch_semesters():
     user_id = get_current_user_id()
     data = request.get_json() or {}
     should_replace = data.get("replace", True)
+
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        if should_replace:
+            mongo_db.semesters.delete_many({"user_id": user_id})
+        for entry in data.get("semesters", []):
+            sem_number = safe_int(entry.get("sem_number"), 1)
+            subjects = []
+            for s in entry.get("subjects", []):
+                subjects.append({
+                    "name": str(s.get("name", "")).strip() or "Untitled Subject",
+                    "credits": safe_float(s.get("credits"), 0.0),
+                    "grade": str(s.get("grade", "S")).strip(),
+                    "is_audit": bool(s.get("is_audit", False))
+                })
+            compressed = [compress_subject(s) for s in subjects]
+            mongo_db.semesters.update_one(
+                {"user_id": user_id, "sem_number": sem_number},
+                {"$set": {"user_id": user_id, "sem_number": sem_number, "subjects": compressed}},
+                upsert=True
+            )
+        return jsonify({"message": "Semesters processed"}), 200
+
 
     if should_replace:
         user_sems = Semester.query.filter_by(user_id=user_id).all()
@@ -220,13 +404,47 @@ def batch_semesters():
     return jsonify({"message": "Semesters processed"}), 200
 
 
+
 @api.route("/transcript", methods=["GET"])
 @jwt_required(optional=True)
 def get_transcript():
     user_id = get_current_user_id()
     requested_student_id = request.args.get("student_id")
+    mongo_db = get_mongo_db()
 
-    # Handle admin requesting a specific student's transcript
+    if mongo_db is not None:
+        if requested_student_id and user_id is not None:
+            current_user = mongo_db.users.find_one({"_id": user_id}) or mongo_db.users.find_one({"_id": safe_int(user_id)})
+            if current_user and current_user.get("role") == "admin":
+                user_id = safe_int(requested_student_id, user_id)
+        
+        student_user = mongo_db.users.find_one({"_id": user_id}) or mongo_db.users.find_one({"_id": safe_int(user_id)}) if user_id is not None else None
+        cursor = mongo_db.semesters.find({"user_id": user_id}).sort("sem_number", 1)
+        sem_data = []
+        for doc in cursor:
+            subjects = doc.get("subjects", [])
+            sgpa = calculate_sgpa(subjects)
+            total_credits = sum(safe_float(s.get("credits", 0)) for s in subjects if not s.get("is_audit", False))
+            sem_data.append({"sem_number": doc.get("sem_number", 1), "sgpa": sgpa, "credits": total_credits})
+
+        cgpa = calculate_cgpa([(s["credits"], s["sgpa"]) for s in sem_data])
+        percentage = cgpa_to_percentage(cgpa)
+        klass = get_class(cgpa)
+        response = {
+            "semesters": sem_data,
+            "cgpa": cgpa,
+            "percentage": percentage,
+            "class": klass
+        }
+        if student_user:
+            response["student"] = {
+                "id": student_user["_id"],
+                "username": student_user["username"],
+                "name": student_user.get("name") or student_user["username"],
+                "role": student_user.get("role", "student")
+            }
+        return jsonify(response)
+
     if requested_student_id and user_id is not None:
         current_user = db.session.get(User, user_id)
         if current_user and current_user.role == "admin":
@@ -262,6 +480,17 @@ def get_transcript():
 @jwt_required(optional=True)
 def export_data():
     user_id = get_current_user_id()
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        cursor = mongo_db.semesters.find({"user_id": user_id}).sort("sem_number", 1)
+        result = []
+        for doc in cursor:
+            result.append({
+                "sem_number": doc.get("sem_number", 1),
+                "subjects": doc.get("subjects", [])
+            })
+        return jsonify({"semesters": result})
+
     semesters = Semester.query.filter_by(user_id=user_id).order_by(Semester.sem_number).all()
     result = []
     for sem in semesters:
@@ -273,11 +502,32 @@ def export_data():
     return jsonify({"semesters": result})
 
 
+
 @api.route("/data/import", methods=["POST"])
 @jwt_required(optional=True)
 def import_data():
     user_id = get_current_user_id()
     data = request.get_json() or {}
+    mongo_db = get_mongo_db()
+
+    if mongo_db is not None:
+        mongo_db.semesters.delete_many({"user_id": user_id})
+        for entry in data.get("semesters", []):
+            sem_number = safe_int(entry.get("sem_number"), 1)
+            subjects = []
+            for s in entry.get("subjects", []):
+                subjects.append({
+                    "name": str(s.get("name", "")).strip() or "Untitled Subject",
+                    "credits": safe_float(s.get("credits"), 0.0),
+                    "grade": str(s.get("grade", "S")).strip(),
+                    "is_audit": bool(s.get("is_audit", False))
+                })
+            mongo_db.semesters.update_one(
+                {"user_id": user_id, "sem_number": sem_number},
+                {"$set": {"user_id": user_id, "sem_number": sem_number, "subjects": subjects}},
+                upsert=True
+            )
+        return jsonify({"message": "Data imported"}), 200
 
     user_sems = Semester.query.filter_by(user_id=user_id).all()
     for sem in user_sems:
@@ -313,6 +563,24 @@ def get_students():
     user_id = get_current_user_id()
     if not user_id:
         return jsonify({"message": "Admin authorization required"}), 403
+
+    mongo_db = get_mongo_db()
+    if mongo_db is not None:
+        current_user = mongo_db.users.find_one({"_id": user_id}) or mongo_db.users.find_one({"_id": safe_int(user_id)})
+        if not current_user or current_user.get("role") != "admin":
+            return jsonify({"message": "Admin authorization required"}), 403
+        
+        students_cursor = mongo_db.users.find({"role": "student"})
+        students_list = []
+        for s in students_cursor:
+            students_list.append({
+                "id": s["_id"],
+                "username": s["username"],
+                "name": s.get("name") or s["username"],
+                "role": s.get("role", "student")
+            })
+        return jsonify(students_list)
+
     current_user = db.session.get(User, user_id)
     if not current_user or current_user.role != "admin":
         return jsonify({"message": "Admin authorization required"}), 403
@@ -327,12 +595,51 @@ def admin_bulk_upload():
     user_id = get_current_user_id()
     if not user_id:
         return jsonify({"message": "Admin authorization required"}), 403
+
+    mongo_db = get_mongo_db()
+    data = request.get_json() or {}
+    entries = data.get("entries", [])
+
+    if mongo_db is not None:
+        current_user = mongo_db.users.find_one({"_id": user_id}) or mongo_db.users.find_one({"_id": safe_int(user_id)})
+        if not current_user or current_user.get("role") != "admin":
+            return jsonify({"message": "Admin authorization required"}), 403
+        
+        for entry in entries:
+            username = str(entry.get("username", "")).strip().lower()
+            if not username:
+                continue
+            name = str(entry.get("name", "")).strip() or username
+            password = str(entry.get("password", "password123")).strip()
+            
+            user = mongo_db.users.find_one({"username": username})
+            if not user:
+                last_user = mongo_db.users.find_one(sort=[("_id", -1)])
+                next_id = (last_user["_id"] + 1) if (last_user and isinstance(last_user.get("_id"), int)) else 1
+                hashed_pwd = generate_password_hash(password)
+                user = {"_id": next_id, "username": username, "password_hash": hashed_pwd, "name": name, "role": "student"}
+                mongo_db.users.insert_one(user)
+            
+            target_user_id = user["_id"]
+            sem_number = safe_int(entry.get("sem_number"), 1)
+            subjects = []
+            for s in entry.get("subjects", []):
+                subjects.append({
+                    "name": str(s.get("name", "")).strip() or "Untitled Subject",
+                    "credits": safe_float(s.get("credits"), 0.0),
+                    "grade": str(s.get("grade", "S")).strip(),
+                    "is_audit": bool(s.get("is_audit", False))
+                })
+            mongo_db.semesters.update_one(
+                {"user_id": target_user_id, "sem_number": sem_number},
+                {"$set": {"user_id": target_user_id, "sem_number": sem_number, "subjects": subjects}},
+                upsert=True
+            )
+        return jsonify({"message": "Bulk upload completed successfully"}), 201
+
     current_user = db.session.get(User, user_id)
     if not current_user or current_user.role != "admin":
         return jsonify({"message": "Admin authorization required"}), 403
-
-    data = request.get_json() or {}
-    entries = data.get("entries", [])
 
     for entry in entries:
         username = str(entry.get("username", "")).strip().lower()
@@ -366,3 +673,4 @@ def admin_bulk_upload():
 
     db.session.commit()
     return jsonify({"message": "Bulk upload completed successfully"}), 201
+

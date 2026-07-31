@@ -22,6 +22,28 @@ if supabase_url and supabase_key:
     except Exception as e:
         print(f"[INFO] Supabase client init info: {e}")
 
+# MongoDB Atlas setup
+mongo_db = None
+mongodb_uri = os.environ.get("MONGODB_URI") or os.environ.get("MONGO_URI")
+if mongodb_uri:
+    try:
+        from pymongo import MongoClient
+        mongo_client = MongoClient(mongodb_uri, serverSelectionTimeoutMS=5000)
+        # Verify connection
+        mongo_client.admin.command('ping')
+        try:
+            mongo_db = mongo_client.get_default_database()
+        except Exception:
+            mongo_db = mongo_client["sgpa_db"]
+        if mongo_db is None:
+            mongo_db = mongo_client["sgpa_db"]
+        app.config["MONGO_DB"] = mongo_db
+        print("[INFO] Successfully connected to MongoDB Atlas!")
+
+    except Exception as e:
+        print(f"[WARNING] Could not connect to MongoDB Atlas URI: {e}")
+
+
 def check_db_connection(url):
     try:
         parsed = urlparse(url)

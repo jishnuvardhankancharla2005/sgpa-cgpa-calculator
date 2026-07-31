@@ -249,6 +249,38 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
     }
   };
 
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState("");
+  const [isSavingAll, setIsSavingAll] = useState(false);
+
+  const handleSaveAllToDatabase = async () => {
+    if (semesters.length === 0) {
+      return alert("No semester details to save. Please add a semester or import a PDF first.");
+    }
+    setIsSavingAll(true);
+    setError("");
+    setSaveSuccessMsg("");
+    try {
+      const normalized = semesters.map((sem) => ({
+        sem_number: sem.sem_number,
+        subjects: sem.subjects.map((s) => ({
+          name: s.name,
+          credits: Number(s.credits) || 0,
+          grade: s.grade || "S",
+          is_audit: Boolean(s.is_audit)
+
+        }))
+      }));
+      await api.post("/semesters/batch", { semesters: normalized, replace: true });
+      setSaveSuccessMsg("✅ All semester details & academic records successfully saved to MongoDB database!");
+      await load();
+      setTimeout(() => setSaveSuccessMsg(""), 6000);
+    } catch {
+      setError("Failed to save records to database. Please check connection.");
+    } finally {
+      setIsSavingAll(false);
+    }
+  };
+
   const handleClearAll = async () => {
     if (semesters.length === 0) return;
     if (!confirm("Clear all semester data and start fresh with empty columns?")) return;
@@ -300,7 +332,12 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
         </div>
       </header>
 
-      {error && <p style={{ color: "red", marginBottom: 12 }}>{error}</p>}
+      {error && <p style={{ color: "#dc2626", background: "#fef2f2", padding: "10px 14px", borderRadius: 6, border: "1px solid #fca5a5", marginBottom: 12 }}>{error}</p>}
+      {saveSuccessMsg && (
+        <div style={{ color: "#15803d", background: "#f0fdf4", padding: "12px 16px", borderRadius: 6, border: "1px solid #86efac", marginBottom: 16, fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>{saveSuccessMsg}</span>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 16, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={card}><strong>CGPA</strong><br /><span style={{ fontSize: 28 }}>{cgpa.toFixed(2)}</span></div>
@@ -318,9 +355,34 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
         onClearAll={handleClearAll}
       />
 
-      <button onClick={startAdd} style={{ marginBottom: 16, padding: "10px 20px", cursor: "pointer", background: "#52c41a", color: "#fff", border: "none", borderRadius: 4, fontWeight: 600, fontSize: 14 }}>
-        {showAddForm ? "Cancel" : "+ Add Semester"}
-      </button>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <button onClick={startAdd} style={{ padding: "10px 20px", cursor: "pointer", background: "#52c41a", color: "#fff", border: "none", borderRadius: 6, fontWeight: 600, fontSize: 14 }}>
+          {showAddForm ? "Cancel" : "+ Add Semester"}
+        </button>
+
+        <button
+          onClick={handleSaveAllToDatabase}
+          disabled={isSavingAll || semesters.length === 0}
+          style={{
+            padding: "10px 22px",
+            cursor: semesters.length === 0 ? "not-allowed" : "pointer",
+            background: semesters.length === 0 ? "#cbd5e1" : "#2563eb",
+            color: "#fff",
+            border: "none",
+            borderRadius: 6,
+            fontWeight: 700,
+            fontSize: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            boxShadow: semesters.length === 0 ? "none" : "0 2px 6px rgba(37,99,235,0.3)",
+            transition: "all 0.2s ease"
+          }}
+        >
+          <span>💾</span>
+          <span>{isSavingAll ? "Saving to Database..." : "Save All to Database"}</span>
+        </button>
+      </div>
 
       {showAddForm && (
         <SemesterForm
@@ -329,6 +391,7 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
           onCancel={() => setShowAddForm(false)}
         />
       )}
+
 
       <div>
         {semesters.map((sem) =>

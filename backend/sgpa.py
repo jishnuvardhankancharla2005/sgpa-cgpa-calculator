@@ -12,12 +12,30 @@ GRADE_POINTS = {
 def calculate_sgpa(subjects):
     if not subjects:
         return 0.0
-    filtered = [(s.credits, str(s.grade).strip().upper()) for s in subjects if not s.is_audit]
+    filtered = []
+    for s in subjects:
+        if isinstance(s, dict):
+            is_audit = s.get("is_audit", False)
+            credits = s.get("credits", 0.0)
+            grade = s.get("grade", "S")
+        else:
+            is_audit = getattr(s, "is_audit", False)
+            credits = getattr(s, "credits", 0.0)
+            grade = getattr(s, "grade", "S")
+        
+        if not is_audit:
+            try:
+                c_val = float(credits)
+            except (ValueError, TypeError):
+                c_val = 0.0
+            filtered.append((c_val, str(grade).strip().upper()))
+
     total_credits = sum(c for c, g in filtered)
     if total_credits <= 0:
         return 0.0
     total_points = sum(c * GRADE_POINTS.get(g, 0) for c, g in filtered)
     return round(total_points / total_credits, 2)
+
 
 def calculate_cgpa(semesters_data):
     if not semesters_data:
