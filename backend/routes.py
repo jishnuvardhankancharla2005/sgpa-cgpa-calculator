@@ -183,6 +183,17 @@ def get_me():
 
 
 
+def user_id_clause(user_id):
+    if user_id is None:
+        return None
+    ids = [user_id]
+    if isinstance(user_id, int):
+        ids.append(str(user_id))
+    elif isinstance(user_id, str) and user_id.isdigit():
+        ids.append(int(user_id))
+    return {"$in": ids}
+
+
 # ================= SEMESTER & TRANSCRIPT ROUTES =================
 
 @api.route("/semesters", methods=["GET"])
@@ -191,7 +202,9 @@ def get_semesters():
     user_id = get_current_user_id()
     mongo_db = get_mongo_db()
     if mongo_db is not None:
-        cursor = mongo_db.semesters.find({"user_id": user_id}).sort("sem_number", 1)
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
+        cursor = mongo_db.semesters.find(u_filter).sort("sem_number", 1)
         result = []
         for doc in cursor:
             raw_subs = doc.get("subjects", [])
@@ -238,12 +251,23 @@ def add_semester():
     mongo_db = get_mongo_db()
     if mongo_db is not None:
         compressed = [compress_subject(s) for s in subjects_list]
-        mongo_db.semesters.update_one(
-            {"user_id": user_id, "sem_number": sem_number},
-            {"$set": {"user_id": user_id, "sem_number": sem_number, "subjects": compressed}},
-            upsert=True
-        )
-        sem_doc = mongo_db.semesters.find_one({"user_id": user_id, "sem_number": sem_number})
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
+        existing = mongo_db.semesters.find_one({**u_filter, "sem_number": sem_number})
+        if existing:
+            mongo_db.semesters.update_one(
+                {"_id": existing["_id"]},
+                {"$set": {"user_id": user_id, "sem_number": sem_number, "subjects": compressed}}
+            )
+            sem_doc = mongo_db.semesters.find_one({"_id": existing["_id"]})
+        else:
+            res = mongo_db.semesters.insert_one({
+                "user_id": user_id,
+                "sem_number": sem_number,
+                "subjects": compressed
+            })
+            sem_doc = mongo_db.semesters.find_one({"_id": res.inserted_id})
+        
         sgpa = calculate_sgpa(subjects_list)
         return jsonify({
             "id": str(sem_doc["_id"]),
@@ -252,7 +276,6 @@ def add_semester():
             "sgpa": sgpa,
             "subjects": subjects_list
         }), 201
-
 
     sem = Semester.query.filter_by(user_id=user_id, sem_number=sem_number).first()
     if not sem:
@@ -299,15 +322,42 @@ def update_semester(sem_id):
 
     mongo_db = get_mongo_db()
     if mongo_db is not None:
-        new_sem_num = safe_int(data.get("sem_number"), safe_int(sem_id))
+        from bson.objectid import ObjectId
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
+        target_doc = None
+        try:
+            target_doc = mongo_db.semesters.find_one({**u_filter, "_id": ObjectId(sem_id)})
+        except Exception:
+            pass
+        if not target_doc:
+            target_doc = mongo_db.semesters.find_one({**u_filter, "_id": safe_int(sem_id, sem_id)})
+        if not target_doc:
+            target_doc = mongo_db.semesters.find_one({**u_filter, "sem_number": safe_int(sem_id)})
+
+        if not target_doc:
+            return jsonify({"message": "Semester not found"}), 404
+
+        new_sem_num = safe_int(data.get("sem_number"), target_doc.get("sem_number", 1))
         compressed = [compress_subject(s) for s in subjects_list]
         mongo_db.semesters.update_one(
-            {"user_id": user_id, "sem_number": safe_int(sem_id)},
+            {"_id": target_doc["_id"]},
             {"$set": {"sem_number": new_sem_num, "subjects": compressed}}
         )
-        return jsonify({"sgpa": calculate_sgpa(subjects_list), "subjects": subjects_list})
+        return jsonify({
+            "id": str(target_doc["_id"]),
+            "sem_number": new_sem_num,
+            "sgpa": calculate_sgpa(subjects_list),
+            "subjects": subjects_list
+        }), 200
 
-    sem = Semester.query.filter_by(id=safe_int(sem_id), user_id=user_id).first_or_404()
+    sem_num = safe_int(sem_id)
+    sem = Semester.query.filter_by(id=sem_num, user_id=user_id).first()
+    if not sem:
+        sem = Semester.query.filter_by(sem_number=sem_num, user_id=user_id).first()
+    if not sem:
+        return jsonify({"message": "Semester not found"}), 404
+
     if "sem_number" in data:
         sem.sem_number = safe_int(data["sem_number"], sem.sem_number)
 
@@ -324,7 +374,12 @@ def update_semester(sem_id):
 
     db.session.commit()
     subjects = Subject.query.filter_by(sem_id=sem.id).all()
-    return jsonify({"sgpa": calculate_sgpa(subjects), "subjects": [s.to_dict() for s in subjects]})
+    return jsonify({
+        "id": sem.id,
+        "sem_number": sem.sem_number,
+        "sgpa": calculate_sgpa(subjects),
+        "subjects": [s.to_dict() for s in subjects]
+    }), 200
 
 
 @api.route("/semesters/<sem_id>", methods=["DELETE"])
@@ -334,17 +389,34 @@ def delete_semester(sem_id):
     mongo_db = get_mongo_db()
     if mongo_db is not None:
         from bson.objectid import ObjectId
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
+        target_doc = None
         try:
-            query = {"_id": ObjectId(sem_id), "user_id": user_id}
+            target_doc = mongo_db.semesters.find_one({**u_filter, "_id": ObjectId(sem_id)})
         except Exception:
-            query = {"sem_number": safe_int(sem_id), "user_id": user_id}
-        mongo_db.semesters.delete_one(query)
-        return jsonify({"message": "Deleted"})
+            pass
+        if not target_doc:
+            target_doc = mongo_db.semesters.find_one({**u_filter, "_id": safe_int(sem_id, sem_id)})
+        if not target_doc:
+            target_doc = mongo_db.semesters.find_one({**u_filter, "sem_number": safe_int(sem_id)})
 
-    sem = Semester.query.filter_by(id=safe_int(sem_id), user_id=user_id).first_or_404()
+        if target_doc:
+            mongo_db.semesters.delete_one({"_id": target_doc["_id"]})
+            return jsonify({"message": "Deleted"}), 200
+        return jsonify({"message": "Semester not found"}), 404
+
+    sem_num = safe_int(sem_id)
+    sem = Semester.query.filter_by(id=sem_num, user_id=user_id).first()
+    if not sem:
+        sem = Semester.query.filter_by(sem_number=sem_num, user_id=user_id).first()
+    if not sem:
+        return jsonify({"message": "Semester not found"}), 404
+
+    Subject.query.filter_by(sem_id=sem.id).delete()
     db.session.delete(sem)
     db.session.commit()
-    return jsonify({"message": "Deleted"})
+    return jsonify({"message": "Deleted"}), 200
 
 
 @api.route("/semesters/batch", methods=["POST"])
@@ -356,8 +428,10 @@ def batch_semesters():
 
     mongo_db = get_mongo_db()
     if mongo_db is not None:
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
         if should_replace:
-            mongo_db.semesters.delete_many({"user_id": user_id})
+            mongo_db.semesters.delete_many(u_filter)
         for entry in data.get("semesters", []):
             sem_number = safe_int(entry.get("sem_number"), 1)
             subjects = []
@@ -369,11 +443,18 @@ def batch_semesters():
                     "is_audit": bool(s.get("is_audit", False))
                 })
             compressed = [compress_subject(s) for s in subjects]
-            mongo_db.semesters.update_one(
-                {"user_id": user_id, "sem_number": sem_number},
-                {"$set": {"user_id": user_id, "sem_number": sem_number, "subjects": compressed}},
-                upsert=True
-            )
+            existing = mongo_db.semesters.find_one({**u_filter, "sem_number": sem_number}) if not should_replace else None
+            if existing:
+                mongo_db.semesters.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {"sem_number": sem_number, "subjects": compressed}}
+                )
+            else:
+                mongo_db.semesters.insert_one({
+                    "user_id": user_id,
+                    "sem_number": sem_number,
+                    "subjects": compressed
+                })
         return jsonify({"message": "Semesters processed"}), 200
 
 
@@ -386,9 +467,13 @@ def batch_semesters():
 
     for entry in data.get("semesters", []):
         sem_number = safe_int(entry.get("sem_number"), 1)
-        sem = Semester(sem_number=sem_number, user_id=user_id)
-        db.session.add(sem)
-        db.session.flush()
+        sem = Semester.query.filter_by(user_id=user_id, sem_number=sem_number).first()
+        if sem:
+            Subject.query.filter_by(sem_id=sem.id).delete()
+        else:
+            sem = Semester(sem_number=sem_number, user_id=user_id)
+            db.session.add(sem)
+            db.session.flush()
 
         for s in entry.get("subjects", []):
             sub = Subject(
@@ -419,10 +504,13 @@ def get_transcript():
                 user_id = safe_int(requested_student_id, user_id)
         
         student_user = mongo_db.users.find_one({"_id": user_id}) or mongo_db.users.find_one({"_id": safe_int(user_id)}) if user_id is not None else None
-        cursor = mongo_db.semesters.find({"user_id": user_id}).sort("sem_number", 1)
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
+        cursor = mongo_db.semesters.find(u_filter).sort("sem_number", 1)
         sem_data = []
         for doc in cursor:
-            subjects = doc.get("subjects", [])
+            raw_subs = doc.get("subjects", [])
+            subjects = [decompress_subject(s) for s in raw_subs]
             sgpa = calculate_sgpa(subjects)
             total_credits = sum(safe_float(s.get("credits", 0)) for s in subjects if not s.get("is_audit", False))
             sem_data.append({"sem_number": doc.get("sem_number", 1), "sgpa": sgpa, "credits": total_credits})
@@ -482,12 +570,16 @@ def export_data():
     user_id = get_current_user_id()
     mongo_db = get_mongo_db()
     if mongo_db is not None:
-        cursor = mongo_db.semesters.find({"user_id": user_id}).sort("sem_number", 1)
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
+        cursor = mongo_db.semesters.find(u_filter).sort("sem_number", 1)
         result = []
         for doc in cursor:
+            raw_subs = doc.get("subjects", [])
+            subjects = [decompress_subject(s) for s in raw_subs]
             result.append({
                 "sem_number": doc.get("sem_number", 1),
-                "subjects": doc.get("subjects", [])
+                "subjects": subjects
             })
         return jsonify({"semesters": result})
 
@@ -511,7 +603,9 @@ def import_data():
     mongo_db = get_mongo_db()
 
     if mongo_db is not None:
-        mongo_db.semesters.delete_many({"user_id": user_id})
+        u_clause = user_id_clause(user_id)
+        u_filter = {"user_id": u_clause} if u_clause else {"user_id": None}
+        mongo_db.semesters.delete_many(u_filter)
         for entry in data.get("semesters", []):
             sem_number = safe_int(entry.get("sem_number"), 1)
             subjects = []
@@ -522,11 +616,12 @@ def import_data():
                     "grade": str(s.get("grade", "S")).strip(),
                     "is_audit": bool(s.get("is_audit", False))
                 })
-            mongo_db.semesters.update_one(
-                {"user_id": user_id, "sem_number": sem_number},
-                {"$set": {"user_id": user_id, "sem_number": sem_number, "subjects": subjects}},
-                upsert=True
-            )
+            compressed = [compress_subject(s) for s in subjects]
+            mongo_db.semesters.insert_one({
+                "user_id": user_id,
+                "sem_number": sem_number,
+                "subjects": compressed
+            })
         return jsonify({"message": "Data imported"}), 200
 
     user_sems = Semester.query.filter_by(user_id=user_id).all()
@@ -630,9 +725,10 @@ def admin_bulk_upload():
                     "grade": str(s.get("grade", "S")).strip(),
                     "is_audit": bool(s.get("is_audit", False))
                 })
+            compressed = [compress_subject(s) for s in subjects]
             mongo_db.semesters.update_one(
                 {"user_id": target_user_id, "sem_number": sem_number},
-                {"$set": {"user_id": target_user_id, "sem_number": sem_number, "subjects": subjects}},
+                {"$set": {"user_id": target_user_id, "sem_number": sem_number, "subjects": compressed}},
                 upsert=True
             )
         return jsonify({"message": "Bulk upload completed successfully"}), 201

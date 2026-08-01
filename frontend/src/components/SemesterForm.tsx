@@ -36,8 +36,8 @@ export default function SemesterForm({ semNumber = 1, initialSubjects, onSave, o
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const valid = subjects.filter((s) => s.name.trim() && s.credits);
-    if (valid.length === 0) return alert("Add at least one subject with a name and credits.");
+    const valid = subjects.filter((s) => s.name.trim() !== "" && s.credits !== "" && !isNaN(Number(s.credits)));
+    if (valid.length === 0) return alert("Add at least one subject with a valid name and numeric credits.");
     onSave(semesterNo, valid);
   };
 

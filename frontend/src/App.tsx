@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import Login from "./components/Login";
 import Dashboard from "./components/Dashboard";
 import api from "./api";
+import { ToastProvider, useToast } from "./context/ToastContext";
 import "./index.css";
 
 interface User {
@@ -11,9 +12,10 @@ interface User {
   role: string;
 }
 
-export default function App() {
+function MainApp() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const { showToast } = useToast();
 
   const verifyUser = async () => {
     const token = localStorage.getItem("sgpa_token");
@@ -45,6 +47,7 @@ export default function App() {
     localStorage.removeItem("sgpa_token");
     localStorage.removeItem("sgpa_user");
     setUser(null);
+    showToast("Logged out successfully.", "info");
   };
 
   if (loading) {
@@ -84,6 +87,14 @@ export default function App() {
         <Dashboard user={user} />
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <MainApp />
+    </ToastProvider>
   );
 }
 

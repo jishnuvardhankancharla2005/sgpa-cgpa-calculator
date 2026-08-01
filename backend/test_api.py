@@ -1,4 +1,5 @@
 import json
+import uuid
 from app import app, db
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
@@ -7,8 +8,9 @@ client = app.test_client()
 def test():
     db.drop_all()
     db.create_all()
-    # Register student
-    resp = client.post("/api/auth/register", json={"username": "stu1", "password": "pass", "name": "Test Student", "role": "student"})
+    # Register student with unique username
+    uname = f"stu_{uuid.uuid4().hex[:6]}"
+    resp = client.post("/api/auth/register", json={"username": uname, "password": "pass", "name": "Test Student", "role": "student"})
     assert resp.status_code == 201
     data = resp.get_json()
     token = data["token"]
@@ -122,7 +124,8 @@ def test():
     # Already verified above (CGPA 8.87)
 
     # Register a new student with lower marks
-    resp = client.post("/api/auth/register", json={"username": "stu2", "password": "pass", "name": "Low Scorer", "role": "student"})
+    u_stu2 = f"stu2_{uuid.uuid4().hex[:6]}"
+    resp = client.post("/api/auth/register", json={"username": u_stu2, "password": "pass", "name": "Low Scorer", "role": "student"})
     token2 = resp.get_json()["token"]
     headers2 = {"Authorization": f"Bearer {token2}", "Content-Type": "application/json"}
 
@@ -148,7 +151,8 @@ def test():
 
     # Test admin endpoints
     print("\n--- Testing admin endpoints ---")
-    resp = client.post("/api/auth/register", json={"username": "admin1", "password": "pass", "name": "Admin", "role": "admin"})
+    u_admin = f"admin_{uuid.uuid4().hex[:6]}"
+    resp = client.post("/api/auth/register", json={"username": u_admin, "password": "pass", "name": "Admin", "role": "admin"})
     admin_token = resp.get_json()["token"]
     admin_headers = {"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"}
 

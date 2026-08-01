@@ -1,5 +1,6 @@
 import { useState } from "react";
 import api from "../api";
+import { useToast } from "../context/ToastContext";
 
 interface User {
   id: number;
@@ -13,6 +14,7 @@ interface LoginProps {
 }
 
 export default function Login({ onLoginSuccess }: LoginProps) {
+  const { showToast } = useToast();
   const [isRegister, setIsRegister] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -30,7 +32,9 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     const cleanPassword = password.trim();
 
     if (!cleanUsername || !cleanPassword) {
-      setError("Username and password are required.");
+      const msg = "Username and password are required.";
+      setError(msg);
+      showToast(msg, "warning");
       setLoading(false);
       return;
     }
@@ -45,6 +49,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         });
         localStorage.setItem("sgpa_token", data.token);
         localStorage.setItem("sgpa_user", JSON.stringify(data.user));
+        showToast(`Account created successfully! Welcome, ${data.user.name || cleanUsername}.`, "success");
         onLoginSuccess(data.user, data.token);
       } else {
         const { data } = await api.post("/auth/login", {
@@ -53,11 +58,13 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         });
         localStorage.setItem("sgpa_token", data.token);
         localStorage.setItem("sgpa_user", JSON.stringify(data.user));
+        showToast(`Welcome back, ${data.user.name || cleanUsername}! Logged in successfully.`, "success");
         onLoginSuccess(data.user, data.token);
       }
     } catch (err: any) {
       const msg = err.response?.data?.message || (err.message ? `Connection error: ${err.message}` : "An error occurred during authentication.");
       setError(msg);
+      showToast(msg, "error");
     } finally {
       setLoading(false);
     }

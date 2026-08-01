@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { useToast } from "../context/ToastContext";
 import {
   parsePDFFile,
   exportTranscriptPDF,
@@ -43,6 +44,7 @@ function getClassCategory(cgpa: number) {
 }
 
 export default function PDFManager({ semesters, onImport, onClearAll }: Props) {
+  const { showToast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [parsedResult, setParsedResult] = useState<ParsedPDFResult | null>(null);
@@ -50,7 +52,10 @@ export default function PDFManager({ semesters, onImport, onClearAll }: Props) {
   const [replaceMode, setReplaceMode] = useState<boolean>(true);
 
   const handleExport = () => {
-    if (semesters.length === 0) return alert("No semesters available to export.");
+    if (semesters.length === 0) {
+      showToast("No semesters available to export.", "warning");
+      return alert("No semesters available to export.");
+    }
 
     const studentName = prompt("Enter student name for the transcript:", "Student");
     if (studentName === null) return;
@@ -60,12 +65,7 @@ export default function PDFManager({ semesters, onImport, onClearAll }: Props) {
     const klass = getClassCategory(cgpa);
 
     exportTranscriptPDF(studentName.trim() || "Student", semesters, cgpa, pct, klass);
-
-    setTimeout(() => {
-      if (confirm("Transcript downloaded successfully!\n\nWould you like to clear current data to start fresh for a new transcript or PDF upload?")) {
-        onClearAll?.();
-      }
-    }, 500);
+    showToast(`Transcript PDF exported successfully for ${studentName.trim() || "Student"}!`, "success");
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -76,10 +76,13 @@ export default function PDFManager({ semesters, onImport, onClearAll }: Props) {
     setIsParsing(true);
     try {
       const res = await parsePDFFile(file);
-      onImport(res.semesters, true);
+      setParsedResult(res);
+      setEditSemesters(res.semesters);
+      showToast(`PDF parsed successfully! Found ${res.semesters.length} semester(s).`, "success");
     } catch (err) {
       console.error("PDF Parsing error:", err);
       alert("Could not process this PDF file.");
+      showToast("Could not process this PDF file.", "error");
     } finally {
       setIsParsing(false);
     }

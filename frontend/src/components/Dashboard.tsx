@@ -3,13 +3,14 @@ import api from "../api";
 import SemesterForm from "./SemesterForm";
 import GradeChart from "./GradeChart";
 import PDFManager from "./PDFManager";
+import { useToast } from "../context/ToastContext";
 
 interface SubjectData {
-  id: number; name: string; credits: number; grade: string; is_audit: boolean;
+  id?: number | string; name: string; credits: number; grade: string; is_audit: boolean;
 }
 
 interface SemesterData {
-  id: number; sem_number: number; subjects: SubjectData[]; sgpa: number;
+  id: number | string; sem_number: number; subjects: SubjectData[]; sgpa: number;
 }
 
 interface SemesterExport {
@@ -72,9 +73,9 @@ function ReadonlySubjectRow({ sub }: { sub: SubjectData }) {
 function SemesterCard({ sem, onEdit, onDelete, collapsed, onToggle }: {
   sem: SemesterData;
   onEdit: (s: SemesterData) => void;
-  onDelete: (id: number) => void;
+  onDelete: (id: number | string) => void;
   collapsed: boolean;
-  onToggle: (id: number) => void;
+  onToggle: (id: number | string) => void;
 }) {
   return (
     <div style={{ background: "#fff", padding: 16, borderRadius: 8, marginBottom: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.1)" }}>
@@ -109,7 +110,7 @@ function SemesterCard({ sem, onEdit, onDelete, collapsed, onToggle }: {
 
 function EditCard({ sem, onSave, onCancel }: {
   sem: SemesterData;
-  onSave: (id: number, semNumber: number, subjects: any[]) => void;
+  onSave: (id: number | string, semNumber: number, subjects: any[]) => void;
   onCancel: () => void;
 }) {
   const [semNumber, setSemNumber] = useState(sem.sem_number);
@@ -130,8 +131,8 @@ function EditCard({ sem, onSave, onCancel }: {
   const addSubject = () => setSubjects([...subjects, { name: "", credits: "", grade: "S", is_audit: false }]);
 
   const handleSave = () => {
-    const valid = subjects.filter((s) => s.name.trim() && s.credits);
-    if (valid.length === 0) return alert("Add at least one subject.");
+    const valid = subjects.filter((s) => s.name.trim() !== "" && s.credits !== "" && !isNaN(Number(s.credits)));
+    if (valid.length === 0) return alert("Add at least one subject with a valid name and numeric credits.");
     onSave(sem.id, semNumber, valid);
   };
 
@@ -167,13 +168,14 @@ function EditCard({ sem, onSave, onCancel }: {
   );
 }
 
-export default function Dashboard({ user }: { user?: { id: number; username: string; name: string; role: string } }) {
+export default function Dashboard({ user }: { user?: { id: number | string; username: string; name: string; role: string } }) {
+  const { showToast } = useToast();
   const [semesters, setSemesters] = useState<SemesterData[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | string | null>(null);
   const [editVersion, setEditVersion] = useState(0);
   const [error, setError] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<number | string>>(new Set());
 
   const load = async () => {
     setError("");
@@ -203,13 +205,16 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
       }));
       await api.post("/semesters", { sem_number: semNumber, subjects: normalized });
       setShowAddForm(false);
+      showToast(`Semester ${semNumber} added successfully!`, "success");
       await load();
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to save semester. Please try again.");
+      const msg = err.response?.data?.message || "Failed to save semester. Please try again.";
+      setError(msg);
+      showToast(msg, "error");
     }
   };
 
-  const handleEditSave = async (id: number, semNumber: number, subjects: any[]) => {
+  const handleEditSave = async (id: number | string, semNumber: number, subjects: any[]) => {
     setError("");
     try {
       const normalized = subjects.map((s: any) => ({
@@ -219,20 +224,26 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
       }));
       await api.put(`/semesters/${id}`, { sem_number: semNumber, subjects: normalized });
       setEditingId(null);
+      showToast(`Semester ${semNumber} updated in database successfully!`, "success");
       await load();
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to update semester. Please try again.");
+      const msg = err.response?.data?.message || "Failed to update semester. Please try again.";
+      setError(msg);
+      showToast(msg, "error");
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number | string) => {
     if (!confirm("Delete this semester?")) return;
     setError("");
     try {
       await api.delete(`/semesters/${id}`);
+      showToast("Semester deleted successfully.", "info");
       await load();
-    } catch {
-      setError("Failed to delete semester");
+    } catch (err: any) {
+      const msg = err.response?.data?.message || "Failed to delete semester.";
+      setError(msg);
+      showToast(msg, "error");
     }
   };
 
@@ -243,9 +254,11 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
         subjects: sem.subjects.map((s) => ({ ...s, credits: Number(s.credits) || 0, grade: s.grade || "S" })),
       }));
       await api.post("/semesters/batch", { semesters: normalized, replace });
+      showToast(`${normalized.length} semester(s) imported successfully!`, "success");
       await load();
     } catch {
       setError("Failed to import data");
+      showToast("Failed to import data.", "error");
     }
   };
 
@@ -254,6 +267,7 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
 
   const handleSaveAllToDatabase = async () => {
     if (semesters.length === 0) {
+      showToast("No semester details to save. Please add a semester or import a PDF first.", "warning");
       return alert("No semester details to save. Please add a semester or import a PDF first.");
     }
     setIsSavingAll(true);
@@ -267,15 +281,18 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
           credits: Number(s.credits) || 0,
           grade: s.grade || "S",
           is_audit: Boolean(s.is_audit)
-
         }))
       }));
       await api.post("/semesters/batch", { semesters: normalized, replace: true });
-      setSaveSuccessMsg("✅ All semester details & academic records successfully saved to MongoDB database!");
+      const msg = "All semester details & academic records successfully saved to database!";
+      setSaveSuccessMsg(`✅ ${msg}`);
+      showToast(msg, "success");
       await load();
       setTimeout(() => setSaveSuccessMsg(""), 6000);
     } catch {
-      setError("Failed to save records to database. Please check connection.");
+      const msg = "Failed to save records to database. Please check connection.";
+      setError(msg);
+      showToast(msg, "error");
     } finally {
       setIsSavingAll(false);
     }
@@ -288,13 +305,15 @@ export default function Dashboard({ user }: { user?: { id: number; username: str
       await api.post("/semesters/batch", { semesters: [], replace: true });
       setShowAddForm(false);
       setEditingId(null);
+      showToast("All semester records cleared.", "warning");
       await load();
     } catch {
       setError("Failed to clear semester data");
+      showToast("Failed to clear semester data.", "error");
     }
   };
 
-  const toggleCollapse = (id: number) => {
+  const toggleCollapse = (id: number | string) => {
     const next = new Set(collapsed);
     if (next.has(id)) next.delete(id);
     else next.add(id);

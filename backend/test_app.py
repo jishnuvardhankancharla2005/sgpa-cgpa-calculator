@@ -94,7 +94,24 @@ with app.app_context():
     ]})
     assert resp.status_code == 200
     resp = client.get("/api/semesters")
-    assert len(resp.get_json()) == 1
+    sems = resp.get_json()
+    assert len(sems) == 1
     print("Batch save - CORRECT")
+
+    # PUT Update test
+    sem_id = sems[0]["id"]
+    put_resp = client.put(f"/api/semesters/{sem_id}", json={
+        "sem_number": 1,
+        "subjects": [
+            {"name": "CS101 Updated", "credits": 4, "grade": "A"},
+            {"name": "CS102 New", "credits": 3, "grade": "S"}
+        ]
+    })
+    assert put_resp.status_code == 200, put_resp.get_json()
+    resp = client.get("/api/semesters")
+    updated_sems = resp.get_json()
+    assert len(updated_sems[0]["subjects"]) == 2
+    assert updated_sems[0]["subjects"][0]["name"] == "CS101 Updated"
+    print("PUT /semesters/<id> update - CORRECT")
 
     print("\n=== ALL TESTS PASSED ===")

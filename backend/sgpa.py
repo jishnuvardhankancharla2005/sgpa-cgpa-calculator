@@ -15,9 +15,15 @@ def calculate_sgpa(subjects):
     filtered = []
     for s in subjects:
         if isinstance(s, dict):
-            is_audit = s.get("is_audit", False)
-            credits = s.get("credits", 0.0)
-            grade = s.get("grade", "S")
+            # Check for compressed representation ("c", "g", "a") or standard keys
+            if "c" in s or "g" in s or "n" in s:
+                is_audit = bool(s.get("a", False))
+                credits = s.get("c", 0.0)
+                grade = s.get("g", "S")
+            else:
+                is_audit = bool(s.get("is_audit", False))
+                credits = s.get("credits", 0.0)
+                grade = s.get("grade", "S")
         else:
             is_audit = getattr(s, "is_audit", False)
             credits = getattr(s, "credits", 0.0)
